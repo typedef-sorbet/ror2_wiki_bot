@@ -1,0 +1,16 @@
+{
+    "name": "ror2_wiki_bot",
+    "version": "0.0.1",
+    "description": "Queries the Risk of Rain 2 wiki when asked by a user.",
+    "main": "main.js",
+    "author": "Spencer Warneke <warnespe001@gmail.com>",
+    "dependencies": {
+        "axios": "^0.24.0",
+        "discord.io": "https://github.com/woor/discord.io/tarball/gateway_v6",
+        "install": "^0.13.0",
+        "jsdom": "^18.1.1",
+        "npm": "^8.1.4",
+        "querystring": "^0.2.1",
+        "winston": "^3.3.3"
+    }
+}
