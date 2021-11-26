@@ -1,9 +1,7 @@
 var discord = require("discord.io");        // Discord API
 var logger = require("winston");            // Logging
 var auth = require("./auth.json");          // Auth tokens
-var axios = require("axios");               // HTTP request library, Promise-based
 var jsdom = require("jsdom");               // Node DOM Support
-var querystring = require("querystring")
 
 const { JSDOM } = jsdom;
 
@@ -15,7 +13,8 @@ async function getURLFromQueryText(stubbed_text) {
     // Search the Risk of Rain 2 wiki for the stubbed text, and return the text of the first search result.
     // TODO: Do error checking here
     
-    try {
+    try 
+    {
         const doc = await JSDOM.fromURL(
             `https://riskofrain2.fandom.com/wiki/Special:Search?query=${sanitizeAndFormat(stubbed_text)}&scope=internal&navigationSearch=true`
         );
@@ -28,55 +27,98 @@ async function getURLFromQueryText(stubbed_text) {
         logger.info(`${stubbed_text} -> ${url}`);
 
         return url;
-    } catch (err) {
+    } 
+    catch (err) 
+    {
         logger.error(`Got error while searching wiki: ${err}`);
     }
 }
 
 async function parseWikiPage(url) {
-    try {
+    try 
+    {
         // We've got a URL, let's grab the page and scrape it for useful information.
         
         const dom = await JSDOM.fromURL(url);
 
         const doc = dom.window.document;
 
-        // First, get the category of what we've searched for.
-        var _category = doc.querySelector(".page-header__categories").children.item(1).textContent;
+        // First, get the category/categories of what we've searched for.
+        var _categories = []
+
+        var categoryNodes = doc.querySelectorAll("div.page-header__categories a");
+
+        for (var i = 0; i < categoryNodes.length; i++)
+        {
+            _categories.push(categoryNodes.item(i).textContent);
+        }
+
+        logger.info(`Page categories: ${_categories}`);
 
         let _data = {};
 
-        switch (_category) {
-            case "Survivors":
-                var _info = doc.querySelector(".infoboxtable");
+        if (_categories.includes("Survivors")) 
+        {
+            var infoItems = doc.querySelectorAll("table.infoboxtable tbody tr");
 
-                const infoItems = _info.children.item(0).children;
+            for (var i = 0; i < infoItems.length; i += 1)
+            {
+                const element = infoItems.item(i);
 
-                for (var i = 0; i < infoItems.length; i += 1)
+                if (element.children.length === 1 && element.firstElementChild.className === "infoboxname") 
                 {
-                    const element = infoItems.item(i);
+                    _data["Name"] = element.firstElementChild.textContent.replace("\n", "");
+                }
+                else if (element.children.length == 2) 
+                {
+                    _data[element.firstElementChild.textContent] = element.children.item(1).textContent.replace("\n", "");
+                }
+            }
+        }
+        else if (_categories.includes("Items"))
+        {
+            // TODO lol
+            
+            var infoItems = doc.querySelectorAll("table.infoboxtable tbody tr");
 
-                    if (element.children.length === 1 && element.children.item(0).className === "infoboxname") {
-                        _data["Name"] = element.children.item(0).textContent.replace("\n", "");
+            for (var i = 0; i < infoItems.length; i += 1)
+            {
+                const element = infoItems.item(i);
+
+                if (element.children.length === 1)
+                {
+                    if (element.firstElementChild.className === "infoboxname" && i === 0)
+                    {
+                        _data["Name"] = element.firstElementChild.textContent.replace("\n", "");
                     }
-                    else if (element.children.length == 2) {
-                        _data[element.children.item(0).textContent] = element.children.item(1).textContent.replace("\n", "");
+                    else if (element.firstElementChild.className === "infoboxdesc")
+                    {
+                        // TODO are span nodes going to cause an issue here?
+                        _data["Description"] = element.firstElementChild.textContent.replace("\n", "");
                     }
                 }
+                else if (i === infoItems.length - 1)
+                {
+                    // This is most likely the stats row.
+                    _data["Stats"] = {
+                        "Stat": element.children.item(0).textContent,
+                        "Value": element.children.item(1).textContent,
+                        "StackType": element.children.item(2).textContent,
+                        "StackAmount": element.children.item(3).textContent,
+                    };
+                }
 
-            break;
-
-            case "Items":
-                // TODO lol
-            break;
+            }
         }
 
         return {
-            category: _category,
+            categories: _categories,
             wiki_url: url,
             data: _data
-        }
-    } catch (err) {
+        };
+    } 
+    catch (err) 
+    {
         logger.error(`Got error while parsing wiki page ${url}: ${err}`);
     }
 }
@@ -85,9 +127,9 @@ function renderWikiData(blob) {
     // Render the data contained within the data list as a Markdown document.
     let message;
 
-    switch (blob.category) {
-        case "Survivors":
-            message = `
+    if (blob.categories.includes("Survivors"))
+    {
+        message = `
 **${blob.data.Name}**
 
 _Health_:   ${blob.data["Health"]}
@@ -96,10 +138,24 @@ _Damage_:   ${blob.data["Damage"]}
 _Speed_:    ${blob.data["Speed"]}
 _Armor_:     ${blob.data["Armor"]}
 
-${blob.wiki_url}
-            `
-        break;
+${blob.wiki_url}`
     }
+    else if (blob.categories.includes("Items"))
+    {
+        message = `
+**${blob.data.Name}**
+
+${blob.data["Description"]}
+
+**Affected Stat**:  ${blob.data["Stats"]["Stat"]}
+**Value**:          ${blob.data["Stats"]["Value"]}
+**Stacking Type**:  ${blob.data["Stats"]["StackType"]}
+**Stack Amount**:   ${blob.data["Stats"]["StackAmount"]}
+
+${blob.wiki_url}`
+    }
+
+    // TODO: Do Items, but better
 
     return message;
 }
@@ -125,7 +181,7 @@ bot.on("ready", function(evt) {
 bot.on("message", function(user, userID, channelID, message, evt){
     // This is where the majority of the bot code is going to happen.
     
-    if (message.startsWith("!"))
+    if (message.startsWith("!") && auth.whitelisted_channels.includes(channelID))
     {
         // Command!
         var args = message.substring(1).split(/\s+/);
@@ -168,6 +224,10 @@ bot.on("message", function(user, userID, channelID, message, evt){
                 logger.info(`Got unknown command ${cmd} with args ${args}`);
             break;
         }
+    }
+    else
+    {
+        logger.info(`Got message ${message} in channel ${channelID} from user ${user} <${userID}>`);
     }
 });
 
