@@ -156,6 +156,14 @@ bot.on("message", function(user, userID, channelID, message, evt){
                 });
             break;
 
+            case "github":
+            case "git":
+                bot.sendMessage({
+                    to: channelID,
+                    message: `You can find the source code for this bot at https://github.com/warnespe001/ror2_wiki_bot !`
+                });
+            break;
+
             default:
                 logger.info(`Got unknown command ${cmd} with args ${args}`);
             break;
