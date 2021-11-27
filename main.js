@@ -123,6 +123,10 @@ async function parseWikiPage(url) {
     }
 }
 
+async function getNewtAltarLocations(url) {
+    throw new Error("Lorem ipsum");
+}
+
 function renderWikiData(blob) {
     // Render the data contained within the data list as a Markdown document.
     let message;
@@ -194,15 +198,42 @@ bot.on("message", function(user, userID, channelID, message, evt){
         switch (cmd)
         {
             case "wiki":
-                // TODO: Check the channel ID to make sure that we're only responding to messages in the RoR2 channel(s)
-                getURLFromQueryText(args.join(" ")).then(url => {
-                    return parseWikiPage(url);
-                }).then(data => {
-                    bot.sendMessage({
-                        to: channelID,
-                        message: renderWikiData(data)
-                    });
-                });
+                getURLFromQueryText(args.join(" ")).then(
+                    url => {
+                        return parseWikiPage(url);
+                    }
+                ).then(
+                    data => {
+                        bot.sendMessage({
+                            to: channelID,
+                            message: renderWikiData(data)
+                        });
+                    }
+                ).catch(
+                    err => {
+                        logger.error(`Failed to run wiki command; reason: ${err}`);
+                    }
+                );
+            break;
+
+            case "newt":
+                // Get the wiki URL for the indicated stage, and then look for the "Newt Altars" section.
+                getURLFromQueryText(args.join(" ")).then(
+                    url => {
+                        return getNewtAltarLocations(url);  
+                    }
+                ).then(
+                    data => {
+                        bot.sendMessage({
+                            to: channelID,
+                            message: renderWikiData(data)
+                        });
+                    }
+                ).catch(
+                    err => {
+                        logger.error(`Failed to run newt command; reason: ${err}`);
+                    }
+                );
             break;
 
             case "ping":
