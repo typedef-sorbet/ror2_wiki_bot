@@ -5,6 +5,7 @@
     "main": "main.js",
     "author": "Spencer Warneke <warnespe001@gmail.com>",
     "dependencies": {
+        "canvas": "^2.8.0",
         "discord.io": "https://github.com/woor/discord.io/tarball/gateway_v6",
         "install": "^0.13.0",
         "jsdom": "^18.1.1",

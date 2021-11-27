@@ -2,6 +2,7 @@ var discord = require("discord.io");        // Discord API
 var logger = require("winston");            // Logging
 var auth = require("./auth.json");          // Auth tokens
 var jsdom = require("jsdom");               // Node DOM Support
+const { child } = require("winston");
 
 const { JSDOM } = jsdom;
 
@@ -125,7 +126,7 @@ async function parseWikiPage(url) {
 
 async function getNewtAltarLocations(url) {
     // Grab the page from the URL.
-    const dom = await JSDOM.fromURL(url);
+    const dom = await JSDOM.fromURL(url, {resources: "usable"});
 
     const doc = dom.window.document;
 
@@ -149,8 +150,17 @@ async function getNewtAltarLocations(url) {
 
     _data = {}
 
+    // Get the page name.
+    _data["Stage Name"] = doc.querySelector("h1#firstHeading").textContent.replace(/(\n|\t)/g, "");
+
     // Look for the Newt Altar section on the wiki.
     var newtAltarSpan = doc.querySelector("h2 span#Newt_Altars");
+
+    // Check to make sure we actually grabbed something there.
+    if (newtAltarSpan === null)
+    {
+        throw new Error("Stage does not have any Newt Altars.");
+    }
 
     // That grabbed the span inside of an <h2> tag. The list we want is a sibling of that <h2> tag.
     // Find it.
@@ -158,23 +168,44 @@ async function getNewtAltarLocations(url) {
 
     while (nodePtr.tagName !== "OL")
     {
-        if (nodePtr.tagName === "P")
-        {
-            _data["Description"] = nodePtr.textContent;
-        }
         nodePtr = nodePtr.nextSibling;
     }
+
+    // Should be OL
+    logger.info(`First node: tagName: ${nodePtr.tagName}`);
 
     // nodePtr is now pointing at the ordered list, presumably.
     // TODO should probably do some error checking on that lol
 
-    _data["Locations"] = "";
+    _data["Locations"] = [];
     for (var i = 0; i < nodePtr.children.length; i++)
     {
         var listItem = nodePtr.children.item(i);
 
-        _data["Locations"] += `${listItem}`
+        _data["Locations"].push(`* ${listItem.textContent}`);
     }
+
+    _data["Images"] = [];
+
+    // Grab all of the image tags that call out Newt Altars.
+    var imageNodes = doc.querySelectorAll("img");
+
+    for (var i = 0; i < imageNodes.length; i++)
+    {
+        var imageNode = imageNodes.item(i);
+
+        if (imageNode.hasAttribute("data-image-key") && imageNode.getAttribute("data-image-key").includes("_NA"))
+        {
+            // logger.info(`Found image: ${imageNode.getAttribute("src")}`);
+            _data["Images"].push(imageNode.parentNode.getAttribute("href"));
+        }
+    }
+
+    return {
+        categories: ["Newt Altars"],
+        wiki_url: url,
+        data: _data
+    };
 }
 
 function renderWikiData(blob) {
@@ -208,10 +239,25 @@ ${blob.data["Description"]}
 
 ${blob.wiki_url}`
     }
+    else if (blob.categories.includes("Newt Altars"))
+    {
+        message = `
+** Newt Altars on ${blob.data["Stage Name"]} **
+
+${blob.data["Stage Name"]} has Newt Altars in the following locations:
+
+${blob.data["Locations"].join("\n")}
+`
+    }
 
     // TODO: Do Items, but better
 
     return message;
+}
+
+async function sleep(ms)
+{
+    await new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // configure logger settings
@@ -253,10 +299,10 @@ bot.on("message", function(user, userID, channelID, message, evt){
                         return parseWikiPage(url);
                     }
                 ).then(
-                    data => {
+                    blob => {
                         bot.sendMessage({
                             to: channelID,
-                            message: renderWikiData(data)
+                            message: renderWikiData(blob)
                         });
                     }
                 ).catch(
@@ -273,15 +319,33 @@ bot.on("message", function(user, userID, channelID, message, evt){
                         return getNewtAltarLocations(url);  
                     }
                 ).then(
-                    data => {
+                    blob => {
                         bot.sendMessage({
                             to: channelID,
-                            message: renderWikiData(data)
+                            message: renderWikiData(blob)
+                        },
+                        (err, resp) => {
+                            for (var i = 0; i < blob.data["Images"].length; i++)
+                            {
+                                bot.sendMessage({
+                                    to: channelID,
+                                    message: "",
+                                    embed: {
+                                        image: {
+                                            url: blob.data["Images"][i]
+                                        }
+                                    }
+                                });
+                            }
                         });
                     }
                 ).catch(
                     err => {
                         logger.error(`Failed to run newt command; reason: ${err}`);
+                        bot.sendMessage({
+                            to: channelID,
+                            message: err
+                        });
                     }
                 );
             break;
