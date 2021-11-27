@@ -123,6 +123,60 @@ async function parseWikiPage(url) {
     }
 }
 
+async function getNewtAltarLocations(url) {
+    // Grab the page from the URL.
+    const dom = await JSDOM.fromURL(url);
+
+    const doc = dom.window.document;
+
+    // Check to make sure that this is a stage page. If it isn't, then we're kinda screwed.
+    var isEnvironment = false;
+
+    var categoryNodes = doc.querySelectorAll("div.page-header__categories a");
+
+    for (var i = 0; i < categoryNodes.length; i++)
+    {
+        if (categoryNodes.item(i).textContent === "Environments")
+        {
+            isEnvironment = true;
+        }
+    }
+
+    if (!isEnvironment)
+    {
+        throw new Error("Specified wiki page does not specify an environment");
+    }
+
+    _data = {}
+
+    // Look for the Newt Altar section on the wiki.
+    var newtAltarSpan = doc.querySelector("h2 span#Newt_Altars");
+
+    // That grabbed the span inside of an <h2> tag. The list we want is a sibling of that <h2> tag.
+    // Find it.
+    var nodePtr = newtAltarSpan.parentElement;
+
+    while (nodePtr.tagName !== "OL")
+    {
+        if (nodePtr.tagName === "P")
+        {
+            _data["Description"] = nodePtr.textContent;
+        }
+        nodePtr = nodePtr.nextSibling;
+    }
+
+    // nodePtr is now pointing at the ordered list, presumably.
+    // TODO should probably do some error checking on that lol
+
+    _data["Locations"] = "";
+    for (var i = 0; i < nodePtr.children.length; i++)
+    {
+        var listItem = nodePtr.children.item(i);
+
+        _data["Locations"] += `${listItem}`
+    }
+}
+
 function renderWikiData(blob) {
     // Render the data contained within the data list as a Markdown document.
     let message;
@@ -194,15 +248,42 @@ bot.on("message", function(user, userID, channelID, message, evt){
         switch (cmd)
         {
             case "wiki":
-                // TODO: Check the channel ID to make sure that we're only responding to messages in the RoR2 channel(s)
-                getURLFromQueryText(args.join(" ")).then(url => {
-                    return parseWikiPage(url);
-                }).then(data => {
-                    bot.sendMessage({
-                        to: channelID,
-                        message: renderWikiData(data)
-                    });
-                });
+                getURLFromQueryText(args.join(" ")).then(
+                    url => {
+                        return parseWikiPage(url);
+                    }
+                ).then(
+                    data => {
+                        bot.sendMessage({
+                            to: channelID,
+                            message: renderWikiData(data)
+                        });
+                    }
+                ).catch(
+                    err => {
+                        logger.error(`Failed to run wiki command; reason: ${err}`);
+                    }
+                );
+            break;
+
+            case "newt":
+                // Get the wiki URL for the indicated stage, and then look for the "Newt Altars" section.
+                getURLFromQueryText(args.join(" ")).then(
+                    url => {
+                        return getNewtAltarLocations(url);  
+                    }
+                ).then(
+                    data => {
+                        bot.sendMessage({
+                            to: channelID,
+                            message: renderWikiData(data)
+                        });
+                    }
+                ).catch(
+                    err => {
+                        logger.error(`Failed to run newt command; reason: ${err}`);
+                    }
+                );
             break;
 
             case "ping":
