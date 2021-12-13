@@ -6,6 +6,108 @@ const { child } = require("winston");
 
 const { JSDOM } = jsdom;
 
+function handleMessage(user, userID, channelID, message, evt, debug=false) { 
+    if (message.startsWith("!") && auth.whitelisted_channels.includes(channelID))
+    {
+        // Command!
+        var args = message.substring(1).split(/\s+/);
+        var cmd = args[0];
+        
+        args = args.splice(1);
+        
+        logger.info(`Received command ${cmd} in channel ${channelID} from user ${user} <${userID}>`)
+
+        switch (cmd)
+        {
+            case "wiki":
+                getURLFromQueryText(args.join(" ")).then(
+                    url => {
+                        return parseWikiPage(url);
+                    }
+                ).then(
+                    blob => {
+                        if (debug) {
+                            console.log(renderWikiData(blob))
+                        }
+                        else
+                        {
+                            bot.sendMessage({
+                                to: channelID,
+                                message: renderWikiData(blob)
+                            });
+                        }
+                    }
+                ).catch(
+                    err => {
+                        logger.error(`Failed to run wiki command; reason: ${err}`);
+                    }
+                );
+            break;
+
+            case "newt":
+                // Get the wiki URL for the indicated stage, and then look for the "Newt Altars" section.
+                getURLFromQueryText(args.join(" ")).then(
+                    url => {
+                        return getNewtAltarLocations(url);  
+                    }
+                ).then(
+                    blob => {
+                        bot.sendMessage({
+                            to: channelID,
+                            message: renderWikiData(blob)
+                        },
+                        (err, resp) => {
+                            for (var i = 0; i < blob.data["Images"].length; i++)
+                            {
+                                bot.sendMessage({
+                                    to: channelID,
+                                    message: "",
+                                    embed: {
+                                        image: {
+                                            url: blob.data["Images"][i]
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                ).catch(
+                    err => {
+                        logger.error(`Failed to run newt command; reason: ${err}`);
+                        bot.sendMessage({
+                            to: channelID,
+                            message: err
+                        });
+                    }
+                );
+            break;
+
+            case "ping":
+                bot.sendMessage({
+                    to: channelID,
+                    message: "Pong!"
+                });
+            break;
+
+            case "github":
+            case "git":
+                bot.sendMessage({
+                    to: channelID,
+                    message: `You can find the source code for this bot at https://github.com/warnespe001/ror2_wiki_bot !`
+                });
+            break;
+
+            default:
+                logger.info(`Got unknown command ${cmd} with args ${args}`);
+            break;
+        }
+    }
+    else
+    {
+        logger.info(`Got message ${message} in channel ${channelID} from user ${user} <${userID}>`);
+    }
+}
+
 function sanitizeAndFormat(dirty_text) {
     return encodeURIComponent(dirty_text);
 }
@@ -57,6 +159,7 @@ async function parseWikiPage(url) {
         logger.info(`Page categories: ${_categories}`);
 
         let _data = {};
+        _data["Stats"] = [];
 
         if (_categories.includes("Survivors")) 
         {
@@ -78,10 +181,11 @@ async function parseWikiPage(url) {
         }
         else if (_categories.includes("Items"))
         {
-            // TODO lol
-            
+            // Grab all table rows in the infoboxtable element
             var infoItems = doc.querySelectorAll("table.infoboxtable tbody tr");
+            var statsMode = false;
 
+            // Iterate over those rows
             for (var i = 0; i < infoItems.length; i += 1)
             {
                 const element = infoItems.item(i);
@@ -98,15 +202,20 @@ async function parseWikiPage(url) {
                         _data["Description"] = element.firstElementChild.textContent.replace("\n", "");
                     }
                 }
-                else if (i === infoItems.length - 1)
+                // If the first row element is the Stat header, enter stat mode and continue to the next node
+                else if (element.firstElementChild.textContent.includes("Stat"))
                 {
-                    // This is most likely the stats row.
-                    _data["Stats"] = {
+                    statMode = true;
+                }
+                else if (statMode)
+                {
+                    // This is a stats row.
+                    _data["Stats"].push({
                         "Stat": element.children.item(0).textContent,
                         "Value": element.children.item(1).textContent,
                         "StackType": element.children.item(2).textContent,
                         "StackAmount": element.children.item(3).textContent,
-                    };
+                    });
                 }
 
             }
@@ -231,11 +340,16 @@ ${blob.wiki_url}`
 **${blob.data.Name}**
 
 ${blob.data["Description"]}
+`
+        for (var i = 0; i < blob.data["Stats"].length; i++)
+        {
+            var statEntry = blob.data["Stats"][i];
+            message += `
 
-**Affected Stat**:  ${blob.data["Stats"]["Stat"]}
-**Value**:          ${blob.data["Stats"]["Value"]}
-**Stacking Type**:  ${blob.data["Stats"]["StackType"]}
-**Stack Amount**:   ${blob.data["Stats"]["StackAmount"]}
+_${statEntry["Stat"]}_: ${statEntry["Value"]} _(${statEntry["StackAmount"]} ${statEntry["StackType"]})_`
+        }
+        
+        message += `
 
 ${blob.wiki_url}`
     }
@@ -260,119 +374,47 @@ async function sleep(ms)
     await new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// configure logger settings
-logger.remove(logger.transports.Console);
-logger.add(new logger.transports.Console, {colorize: true});
-logger.level = "debug";
+if (!process.argv.includes("--debug"))
+{
+    // configure logger settings
+    logger.remove(logger.transports.Console);
+    logger.add(new logger.transports.Console, {colorize: true});
+    logger.level = "debug";
 
-// init discord bot
+    // init discord bot
 
-var bot = new discord.Client({
-    token: auth.token,
-    autorun: true
-});
+    var bot = new discord.Client({
+        token: auth.token,
+        autorun: true
+    });
 
-bot.on("ready", function(evt) {
-    logger.info("Connected!");
-    logger.info("Logged in as: ");
-    logger.info(bot.username + " - (" + bot.id + ")");
-})
+    bot.on("ready", function(evt) {
+        logger.info("Connected!");
+        logger.info("Logged in as: ");
+        logger.info(bot.username + " - (" + bot.id + ")");
+    });
 
-bot.on("message", function(user, userID, channelID, message, evt){
-    // This is where the majority of the bot code is going to happen.
+    bot.on("message", handleMessage);
+}
+else
+{
+    const readline = require("readline");
     
-    if (message.startsWith("!") && auth.whitelisted_channels.includes(channelID))
-    {
-        // Command!
-        var args = message.substring(1).split(/\s+/);
-        var cmd = args[0];
-        
-        args = args.splice(1);
-        
-        logger.info(`Received command ${cmd} in channel ${channelID} from user ${user} <${userID}>`)
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    
+    while (true) {
+        rl.question(">  ", function(msg) {
+            handleMessage("TestUser", "123456", auth.whitelisted_channels[0], msg, null, true);
+        });
 
-        switch (cmd)
-        {
-            case "wiki":
-                getURLFromQueryText(args.join(" ")).then(
-                    url => {
-                        return parseWikiPage(url);
-                    }
-                ).then(
-                    blob => {
-                        bot.sendMessage({
-                            to: channelID,
-                            message: renderWikiData(blob)
-                        });
-                    }
-                ).catch(
-                    err => {
-                        logger.error(`Failed to run wiki command; reason: ${err}`);
-                    }
-                );
-            break;
-
-            case "newt":
-                // Get the wiki URL for the indicated stage, and then look for the "Newt Altars" section.
-                getURLFromQueryText(args.join(" ")).then(
-                    url => {
-                        return getNewtAltarLocations(url);  
-                    }
-                ).then(
-                    blob => {
-                        bot.sendMessage({
-                            to: channelID,
-                            message: renderWikiData(blob)
-                        },
-                        (err, resp) => {
-                            for (var i = 0; i < blob.data["Images"].length; i++)
-                            {
-                                bot.sendMessage({
-                                    to: channelID,
-                                    message: "",
-                                    embed: {
-                                        image: {
-                                            url: blob.data["Images"][i]
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    }
-                ).catch(
-                    err => {
-                        logger.error(`Failed to run newt command; reason: ${err}`);
-                        bot.sendMessage({
-                            to: channelID,
-                            message: err
-                        });
-                    }
-                );
-            break;
-
-            case "ping":
-                bot.sendMessage({
-                    to: channelID,
-                    message: "Pong!"
-                });
-            break;
-
-            case "github":
-            case "git":
-                bot.sendMessage({
-                    to: channelID,
-                    message: `You can find the source code for this bot at https://github.com/warnespe001/ror2_wiki_bot !`
-                });
-            break;
-
-            default:
-                logger.info(`Got unknown command ${cmd} with args ${args}`);
-            break;
-        }
+        rl.on("close", function() {
+            console.log("\nBYE BYE !!!");
+            process.exit(0);
+        });
     }
-    else
-    {
-        logger.info(`Got message ${message} in channel ${channelID} from user ${user} <${userID}>`);
-    }
-});
+}
+
 
