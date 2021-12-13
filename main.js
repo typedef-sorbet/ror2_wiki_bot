@@ -183,7 +183,7 @@ async function parseWikiPage(url) {
         {
             // Grab all table rows in the infoboxtable element
             var infoItems = doc.querySelectorAll("table.infoboxtable tbody tr");
-            var statsMode = false;
+            var statMode = false;
 
             // Iterate over those rows
             for (var i = 0; i < infoItems.length; i += 1)
@@ -211,10 +211,10 @@ async function parseWikiPage(url) {
                 {
                     // This is a stats row.
                     _data["Stats"].push({
-                        "Stat": element.children.item(0).textContent,
-                        "Value": element.children.item(1).textContent,
-                        "StackType": element.children.item(2).textContent,
-                        "StackAmount": element.children.item(3).textContent,
+                        "Stat": element.children.item(0).textContent.replace("\n", ""),
+                        "Value": element.children.item(1).textContent.replace("\n", ""),
+                        "StackType": element.children.item(2).textContent.replace("\n", ""),
+                        "StackAmount": element.children.item(3).textContent.replace("\n", "")
                     });
                 }
 
@@ -339,14 +339,14 @@ ${blob.wiki_url}`
         message = `
 **${blob.data.Name}**
 
-${blob.data["Description"]}
-`
+${blob.data["Description"]}`
+
         for (var i = 0; i < blob.data["Stats"].length; i++)
         {
             var statEntry = blob.data["Stats"][i];
             message += `
 
-_${statEntry["Stat"]}_: ${statEntry["Value"]} _(${statEntry["StackAmount"]} ${statEntry["StackType"]})_`
+**${statEntry["Stat"]}**: ${statEntry["Value"]} _(${statEntry["StackAmount"]} ${statEntry["StackType"]})_`
         }
         
         message += `
